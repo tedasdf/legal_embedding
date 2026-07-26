@@ -9,7 +9,7 @@ import tracemalloc
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.data.load import load_retrieval_split
+from data.load import load_retrieval_split
 from model.bm25 import BM25
 from metrics import evaluate_rankings
 
