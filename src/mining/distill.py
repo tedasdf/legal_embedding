@@ -10,13 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from data.load import load_retrieval_split
-
+from utils.utils import _read_jsonl
+from util import _sha256, _load_corpus_rows
 
 def _load_jsonl_by_key(path, key): return {row[key]: row for row in _read_jsonl(path)}
-def _read_jsonl(path):
-    with path.open(encoding="utf-8-sig") as handle:
-        for line in handle:
-            if line.strip(): yield json.loads(line)
+
 
 def score_teacher_candidates(config: dict) -> dict:
     """Score one positive plus mined candidate negatives with a cross-encoder."""
