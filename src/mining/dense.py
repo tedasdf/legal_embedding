@@ -3,8 +3,8 @@ import json
 from pathlib import Path
 
 from data.load import load_retrieval_split
-from util import _sha256, _load_corpus_rows, _write_jsonl
-
+from util import _sha256, _load_corpus_rows
+from utils.utils import _write_jsonl
 
 def _mining_report(method, split_dir, output_path, counts, quota, parameters):
     return {"schema_version": 1, "method": method, "input_split": str(split_dir),
