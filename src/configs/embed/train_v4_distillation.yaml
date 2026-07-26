@@ -1,0 +1,39 @@
+model_name: Alibaba-NLP/gte-modernbert-base
+run_name: embed_v4_distillation
+train_queries: data/processed/embed/train/queries.jsonl
+train_corpus: data/processed/embed/train/corpus.jsonl
+train_qrels: data/processed/embed/train/qrels.tsv
+validation_queries: data/processed/embed/validation/queries.jsonl
+validation_corpus: data/processed/embed/validation/corpus.jsonl
+validation_qrels: data/processed/embed/validation/qrels.tsv
+test_queries: data/processed/embed/test/queries.jsonl
+test_corpus: data/processed/embed/test/corpus.jsonl
+test_qrels: data/processed/embed/test/qrels.tsv
+teacher_scores_path: data/interim/embed/teacher/cross_encoder/train.jsonl
+sequence_length: 512
+batch_size: 16
+# Physical query groups held on the GPU at once. Gradients accumulate to keep
+# the effective batch_size above while avoiding 16 x 9 candidate passages in
+# one forward graph on a 22 GiB GPU.
+mini_batch_size: 1
+learning_rate: 2.0e-5
+epochs: 3
+warmup_ratio: 0.1
+weight_decay: 0.01
+max_grad_norm: 1.0
+mixed_precision: false
+teacher_temperature: 1.0
+student_scale: 20.0
+distillation_weight: 0.7
+device: auto
+validation_batch_size: 32
+output_directory: artifacts/checkpoints/embed/gte-modernbert-base-v4-distillation
+report_path: reports/experiments/embed/embed_v4_distillation.json
+random_seed: 42
+tracking:
+  enabled: true
+  project: mini-kanon3
+  group: embed-v1-v4
+  run_name: embed-v4-distillation
+  job_type: training
+  tags: [embed, v4, teacher-distillation]

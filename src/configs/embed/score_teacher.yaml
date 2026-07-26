@@ -1,0 +1,11 @@
+teacher_type: cross_encoder
+teacher_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+input_split: data/processed/embed/train
+candidate_negatives_path: data/interim/embed/negatives/dense/train.jsonl
+negatives_per_query: 8
+output_path: data/interim/embed/teacher/cross_encoder/train.jsonl
+report_path: reports/data/embed/cross_encoder_teacher_scores.json
+batch_size: 32
+device: cuda
+trust_remote_code: true
+random_seed: 42

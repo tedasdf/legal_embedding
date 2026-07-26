@@ -1,0 +1,43 @@
+model_name: Alibaba-NLP/gte-modernbert-base
+run_name: embed_v3_dense
+training_supervision: positive pairs + dense hard negatives + cached in-batch negatives
+train_queries: data/processed/embed/train/queries.jsonl
+train_corpus: data/processed/embed/train/corpus.jsonl
+train_qrels: data/processed/embed/train/qrels.tsv
+validation_queries: data/processed/embed/validation/queries.jsonl
+validation_corpus: data/processed/embed/validation/corpus.jsonl
+validation_qrels: data/processed/embed/validation/qrels.tsv
+test_queries: data/processed/embed/test/queries.jsonl
+test_corpus: data/processed/embed/test/corpus.jsonl
+test_qrels: data/processed/embed/test/qrels.tsv
+hard_negatives_path: data/interim/embed/negatives/dense/train.jsonl
+hard_negatives_per_query: 4
+sequence_length: 512
+batch_size: 16
+mini_batch_size: 4
+learning_rate: 2.0e-5
+loss: CachedMultipleNegativesRankingLoss
+loss_scale: 20.0
+normalize_embeddings: true
+similarity: dot_product
+epochs: 3
+warmup_ratio: 0.1
+weight_decay: 0.01
+max_grad_norm: 1.0
+mixed_precision: false
+device: auto
+checkpoint_every_epochs: 1
+validation_batch_size: 32
+sampling:
+  negatives: dense_hard_and_in_batch
+  no_duplicates_per_batch: true
+output_directory: artifacts/checkpoints/embed/gte-modernbert-base-v3-dense
+report_path: reports/experiments/embed/embed_v3_dense.json
+random_seed: 42
+tracking:
+  enabled: true
+  project: mini-kanon3
+  group: embed-v1-v4
+  run_name: embed-v3-dense
+  job_type: training
+  tags: [embed, v3, dense-hard-negatives]

@@ -1,0 +1,29 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Generated datasets: keep directory README files and metadata/checksums only.
+data/raw/**/*
+data/interim/**/*
+data/processed/**/*
+!data/raw/**/README.md
+!data/interim/**/README.md
+!data/processed/**/README.md
+!data/raw/**/*.sha256
+!data/raw/**/metadata.json
+!data/raw/**/LICENCE.md
+!data/**/*.py
+!data/**/*.md
+
+# External benchmark caches and generated model artifacts.
+external/mleb/**/*
+!external/mleb/README.md
+artifacts/**/*
+!artifacts/**/.gitkeep
+!artifacts/**/README.md
+
+# Notebook execution debris and local experiment tracking.
+.ipynb_checkpoints/
+wandb/
+mlruns/

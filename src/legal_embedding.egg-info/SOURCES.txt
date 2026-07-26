@@ -1,0 +1,14 @@
+README.md
+pyproject.toml
+src/__init__.py
+src/data/__init__.py
+src/data/load.py
+src/evaluate/__init__.py
+src/evaluate/evaluate.py
+src/evaluate/metrics.py
+src/evaluate/zero_shot.py
+src/legal_embedding.egg-info/PKG-INFO
+src/legal_embedding.egg-info/SOURCES.txt
+src/legal_embedding.egg-info/dependency_links.txt
+src/legal_embedding.egg-info/top_level.txt
+src/model/bm25.py

@@ -1,0 +1,11 @@
+method: bm25
+input_split: data/processed/embed/train
+output_path: data/interim/embed/negatives/bm25/train.jsonl
+report_path: reports/data/embed/bm25_hard_negatives.json
+num_negatives: 8
+candidate_depth: 100
+k1: 1.5
+b: 0.75
+minimum_score: 0.0
+exclude_same_document: true
+random_seed: 42

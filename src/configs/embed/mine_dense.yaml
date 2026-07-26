@@ -1,0 +1,14 @@
+method: dense
+model_name: artifacts/checkpoints/embed/gte-modernbert-base-v2-bm25/final
+input_split: data/processed/embed/train
+output_path: data/interim/embed/negatives/dense/train.jsonl
+report_path: reports/data/embed/dense_hard_negatives.json
+num_negatives: 16
+candidate_depth: 100
+exclude_same_document: true
+normalize_embeddings: true
+similarity: dot_product
+batch_size: 32
+device: cuda
+trust_remote_code: true
+random_seed: 42

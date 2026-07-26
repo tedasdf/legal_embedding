@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from data.load import load_retrieval_split
-from model.bm25 import BM25
+from utils.bm25 import BM25
 from metrics import evaluate_rankings
 
 tracemalloc.start()
@@ -28,7 +28,7 @@ def evaluate_bm25(split_dir: Path, k1=1.5, b=0.75):
 
 
 def evaluate_dense(model_name: str, split_dir: Path, batch_size=16, device=None,
-                   trust_remote_code=False):
+                       trust_remote_code=False):
     try:
         import numpy as np
         import torch

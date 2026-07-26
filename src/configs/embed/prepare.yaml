@@ -1,0 +1,7 @@
+dataset: isaacus/open-australian-legal-qa
+dataset_version: 2.0.0
+input: data/raw/embed/open-australian-legal-qa-v2.0.0/qa.jsonl
+output_root: data
+split_ratios: [0.8, 0.1, 0.1]
+seed: open-australian-legal-qa-v2
+context_limits: [512, 1024, 2048, 4096]
