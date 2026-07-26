@@ -6,7 +6,7 @@ import collections
 import math, re, json
 from pathlib import Path
 from data.load import load_retrieval_split
-from util import _load_corpus_rows
+from util import _sha256, _load_corpus_rows
 
 def tokenize(text: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", text.casefold())

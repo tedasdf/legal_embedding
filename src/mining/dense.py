@@ -3,11 +3,7 @@ import json
 from pathlib import Path
 
 from data.load import load_retrieval_split
-from util import _load_corpus_rows
-
-def _sha256(path: Path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
+from util import _sha256, _load_corpus_rows
 
 
 def _mining_report(method, split_dir, output_path, counts, quota, parameters):

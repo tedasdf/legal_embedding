@@ -1,5 +1,9 @@
-import json
+import json, hashlib
 from pathlib import Path
+
+def _sha256(path: Path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
 
 def _load_corpus_rows(path: Path):
     rows = {}
