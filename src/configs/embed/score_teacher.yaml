@@ -1,3 +1,4 @@
+method: teacher_distill
 teacher_type: cross_encoder
 teacher_model: cross-encoder/ms-marco-MiniLM-L-6-v2
 input_split: data/processed/embed/train
