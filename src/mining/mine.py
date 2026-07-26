@@ -1,8 +1,8 @@
 import argparse
 import json
 
-from bm25 import mine_dense_hard_negatives
-from dense import mine_bm25_hard_negatives
+from bm25 import mine_bm25_hard_negatives
+from dense import mine_dense_hard_negatives
 from utils.config import load_config
 
 
