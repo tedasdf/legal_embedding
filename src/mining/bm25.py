@@ -5,6 +5,7 @@ from __future__ import annotations
 import collections
 import math
 import re
+from pathlib import Path
 
 
 def tokenize(text: str) -> list[str]:
