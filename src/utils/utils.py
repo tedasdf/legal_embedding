@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 def _write_jsonl(path: Path, rows):
