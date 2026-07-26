@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from data.load import load_retrieval_split
-from utils.utils import _read_jsonl
+from utils.utils import _read_jsonl, _write_jsonl
 from util import _sha256, _load_corpus_rows
 
 def _load_jsonl_by_key(path, key): return {row[key]: row for row in _read_jsonl(path)}
