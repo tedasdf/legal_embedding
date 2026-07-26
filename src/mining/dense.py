@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from data.load import load_retrieval_split
-from util import _sha256, _load_corpus_rows
+from util import _sha256, _load_corpus_rows, _write_jsonl
 
 
 def _mining_report(method, split_dir, output_path, counts, quota, parameters):
@@ -17,12 +17,6 @@ def _mining_report(method, split_dir, output_path, counts, quota, parameters):
                            "minimum_negatives": min(counts, default=0),
                            "maximum_negatives": max(counts, default=0),
                            "mean_negatives": round(sum(counts) / len(counts), 4) if counts else 0}}
-
-def _write_jsonl(path: Path, rows):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="\n") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
 
