@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from zero_shot import evaluate_bm25, evaluate_dense, write_result
+from .zero_shot import evaluate_bm25, evaluate_dense, write_result
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
