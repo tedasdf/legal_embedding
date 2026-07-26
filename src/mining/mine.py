@@ -4,7 +4,7 @@
 import argparse
 import json
 
-from config import load_config
+from utils.config import load_config
 from mining.bm25 import mine_bm25_hard_negatives
 from mining.dense import mine_dense_hard_negatives
 from mining.distill import score_teacher_candidates
