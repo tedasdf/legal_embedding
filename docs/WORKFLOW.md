@@ -41,6 +41,7 @@ flowchart TD
 
 | Stage | Entry point | Configuration | Main output |
 |---|---|---|---|
+| Dataset inspection | `src/data/inspect_dataset.py` | Command-line arguments | Six inspection JSONL files |
 | Data preparation | Not currently present | `src/configs/embed/prepare.yaml` | Retrieval splits |
 | BM25/dense/teacher mining | `src/mining/mine.py` | Mining YAML | Negative or teacher JSONL and report |
 | V1-V3 training | `src/training/main.py` | Training YAML | SentenceTransformer checkpoint |
@@ -84,6 +85,30 @@ The repository currently contains `src/configs/embed/prepare.yaml`, but no
 data-preparation Python entry point. Therefore, the processed split files are
 currently a prerequisite rather than something reproducible from this
 repository alone.
+
+Run all maintained dataset-integrity checks with:
+
+```bash
+python src/data/inspect_dataset.py \
+  --input data/raw/embed/open-australian-legal-qa-v2.0.0/qa.jsonl \
+  --all \
+  --output-dir data/inspection
+```
+
+This produces:
+
+```text
+data/inspection/repeated_version_id_samples.jsonl
+data/inspection/citation_multi_version_candidates.jsonl
+data/inspection/metadata_multi_version_candidates.jsonl
+data/inspection/exact_passage_duplicate_groups.jsonl
+data/inspection/template_similar_passage_pairs.jsonl
+data/inspection/boilerplate_overlap_warnings.jsonl
+```
+
+The normalized-URL check is also run, but it writes no candidate JSONL when no
+cross-ID URL match exists. The obsolete broad
+`text_similarity_candidates.jsonl` output is intentionally not regenerated.
 
 ## 2. Baseline and checkpoint evaluation
 
