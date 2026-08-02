@@ -40,6 +40,17 @@ def evaluate_dense(model_name: str, split_dir: Path, batch_size=16, device=None,
         torch.cuda.reset_peak_memory_stats()
     started = time.perf_counter()
     model = SentenceTransformer(model_name, device=device, trust_remote_code=trust_remote_code)
+    # ModernBERT enables its optional torch.compile path automatically when
+    # Triton is installed. Evaluation does not require compilation, and some
+    # clusters expose the CUDA runtime without an executable nvcc compiler.
+    # Disable reference compilation before the first forward pass while
+    # retaining ordinary CUDA inference.
+    reference_compile_disabled = False
+    for module in model.modules():
+        config = getattr(module, "config", None)
+        if config is not None and hasattr(config, "reference_compile"):
+            config.reference_compile = False
+            reference_compile_disabled = True
     load_seconds = time.perf_counter() - started
     query_ids, passage_ids = list(queries), list(corpus)
     started = time.perf_counter()
@@ -61,6 +72,7 @@ def evaluate_dense(model_name: str, split_dir: Path, batch_size=16, device=None,
                 for row, query_id in enumerate(query_ids)}
     search_seconds = time.perf_counter() - started
     extra = {"batch_size": batch_size, "device": str(model.device),
+             "reference_compile_disabled": reference_compile_disabled,
              "peak_gpu_memory_mb": round(torch.cuda.max_memory_allocated() / 1024**2, 2)
              if torch.cuda.is_available() else None}
     return _result(model_name, split_dir, queries, corpus, qrels, rankings, load_seconds,

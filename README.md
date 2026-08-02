@@ -104,3 +104,18 @@ The embedding model is trained to place the query close to its corresponding pos
 | `source.jurisdiction` | Jurisdiction associated with the document                                      | Metadata and stratified analysis                                             |
 | `source.citation`     | Formal citation or title                                                       | Duplicate-document inspection and provenance                                 |
 | `source.type`         | Legal-document type, such as `decision`                                        | Metadata and stratified analysis                                             |
+
+### Document ID versus passage ID
+
+`source.version_id` identifies the source document or document version. It does not necessarily identify a unique passage.
+
+```text
+Legal document
+└── source.version_id
+    ├── passage 1
+    ├── passage 2
+    ├── passage 3
+    └── passage 4
+```
+
+The dataset does not provide a separate passage identifier. A stable passage ID can therefore be generated from the normalised document ID and passage text:
