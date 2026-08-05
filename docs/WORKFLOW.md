@@ -1,668 +1,492 @@
-# Legal Retrieval Dataset Inspection and Split Strategy
+# Legal Embedding Workflow
 
-## 1. Retrieval objective
+This document explains how the repository entry points, configurations, data
+files, checkpoints, reports and release artifacts depend on one another.
 
-A retrieval system contains three important elements:
+Run commands from the repository root. On the cluster, first expose `src/` as
+an import root:
 
-* the user query;
-* the passage being retrieved;
-* the larger document containing that passage.
+```bash
+export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
+```
 
-Different retrieval tasks require different forms of generalisation. A system may need to answer new queries over a fixed document collection, retrieve an unseen passage from a document represented during training, or process entirely new documents and queries.
+## End-to-end flow
 
-For this project, the primary objective is:
+```mermaid
+flowchart TD
+    A["Raw legal QA JSONL"] --> B["Prepare retrieval splits"]
+    B --> C["train / validation / test<br/>queries.jsonl + corpus.jsonl + qrels.tsv"]
+    C --> D["Zero-shot evaluation<br/>BM25 + base GTE"]
+    C --> E["V1 training<br/>in-batch negatives"]
+    C --> F["BM25 negative mining"]
+    F --> G["V2 training<br/>BM25 hard negatives"]
+    G --> H["Dense negative mining using V2"]
+    H --> I["V3 training<br/>dense hard negatives"]
+    H --> J["Cross-encoder teacher scoring"]
+    J --> K["V4 training<br/>teacher distillation"]
+    E --> L["Evaluate V1-V4"]
+    G --> L
+    I --> L
+    K --> L
+    L --> M["Select final checkpoint"]
+    M --> N["Upload complete checkpoint to Hugging Face"]
+    M --> O["Export optimized ONNX"]
+    O --> P["Validate PyTorch vs ONNX"]
+    O --> Q["Encode passage corpus"]
+    Q --> R["passage_embeddings.npy<br/>passages.jsonl<br/>manifest.json"]
+    R --> S["Query search runtime"]
+```
 
-> Given a new legal query, retrieve the correct passage from a legal document that was not used during model fine-tuning.
+## Repository entry points
 
-This reflects a realistic legal-retrieval setting. New judgments, contracts, court filings, legislative amendments and client documents can be divided into passages, embedded and added to the retrieval index without retraining the embedding model.
+| Stage | Entry point | Configuration | Main output |
+|---|---|---|---|
+| Dataset inspection | `src/data/inspect_dataset.py` | Command-line arguments | Six inspection JSONL files |
+| Data preparation | Not currently present | `src/configs/embed/prepare.yaml` | Retrieval splits |
+| BM25/dense/teacher mining | `src/mining/mine.py` | Mining YAML | Negative or teacher JSONL and report |
+| V1-V3 training | `src/training/main.py` | Training YAML | SentenceTransformer checkpoint |
+| V4 training | `src/training/distill.py` | `train_v4_distillation.yaml` | Distilled checkpoint |
+| Evaluation | `src/evaluate/evaluate.py` | Command-line arguments | JSON and Markdown reports |
+| Hugging Face upload | `src/release/upload_huggingface.py` | Command-line arguments | Public/private Hub repositories |
+| ONNX export | `src/release/export_onnx.py` | Command-line arguments | Deployable ONNX model directory |
+| ONNX validation | `src/release/validate_onnx.py` | Currently hard-coded | Console benchmark |
+| Passage indexing | `src/release/build_passage_index.py` | Command-line arguments | Embeddings, passage rows and manifest |
+| Search | `src/inference/search.py` | Command-line arguments | Ranked passages as JSON |
 
-Legal documents reuse recurring concepts and structures, including:
+## 1. Retrieval data
 
-* breach;
-* negligence;
-* causation;
-* termination;
-* confidentiality;
-* procedural fairness;
-* limitation periods;
-* statutory interpretation.
-
-This repetition allows the model to learn relationships between differently worded passages that concern the same legal issue. However, small wording differences can materially change legal meaning, such as:
-
-* `may` compared with `must`;
-* an obligation compared with a prohibition;
-* immediate termination compared with termination after notice;
-* a general rule compared with an exception;
-* capped liability compared with uncapped liability.
-
-The model must therefore learn both:
-
-1. broad legal-semantic similarity across different documents and wording; and
-2. fine-grained distinctions that may affect legal interpretation.
-
-The main evaluation should test generalisation to both new queries and passages from held-out legal documents. This motivates a document-level split in which every row associated with a given `source.version_id` remains entirely within the train, validation or test partition.
-
----
-
-## 2. Dataset structure
-
-The inspected dataset is:
+Each split is represented by three files:
 
 ```text
-isaacus/open-australian-legal-qa
+data/processed/embed/
+├── train/
+│   ├── queries.jsonl
+│   ├── corpus.jsonl
+│   └── qrels.tsv
+├── validation/
+│   ├── queries.jsonl
+│   ├── corpus.jsonl
+│   └── qrels.tsv
+└── test/
+    ├── queries.jsonl
+    ├── corpus.jsonl
+    └── qrels.tsv
 ```
 
-The local source file contains 2,124 JSONL rows. Each row contains a synthetic legal question-and-answer pair generated from a passage of an Australian legal document.
+The roles are:
 
-A representative row has the following structure:
+- `queries.jsonl`: `query_id` and query text.
+- `corpus.jsonl`: `passage_id`, passage text and available metadata.
+- `qrels.tsv`: positive query-to-passage relevance relationships.
 
-```python
-{
-    "question": "In the case of Nasr v NRMA Insurance [2006] NSWSC 1018, "
-                "why was the plaintiff's appeal lodged out of time?",
+`src/data/load.py` loads these objects for evaluation, mining and training.
 
-    "answer": "The summons was filed approximately seven months after the "
-              "Local Court decision, and no explanation was provided for the delay.",
+The repository currently contains `src/configs/embed/prepare.yaml`, but no
+data-preparation Python entry point. Therefore, the processed split files are
+currently a prerequisite rather than something reproducible from this
+repository alone.
 
-    "text": "Question: ...\nAnswer: ...",
+Run all maintained dataset-integrity checks with:
 
-    "prompt": "The generation prompt containing document metadata, the source "
-              "snippet and QA-generation instructions.",
-
-    "source": {
-        "version_id": "nsw_caselaw:549fc6183004262463bb648a",
-        "type": "decision",
-        "jurisdiction": "new_south_wales",
-        "source": "nsw_caselaw",
-        "citation": "Nasr v NRMA Insurance [2006] NSWSC 1018",
-        "url": "https://www.caselaw.nsw.gov.au/decision/549fc6183004262463bb648a",
-        "text": "The original legal passage from which the QA pair was generated."
-    }
-}
+```bash
+python src/data/inspect_dataset.py \
+  --input data/raw/embed/open-australian-legal-qa-v2.0.0/qa.jsonl \
+  --all \
+  --output-dir data/inspection
 ```
 
-### Retrieval fields
-
-```python
-query = row["question"]
-positive_passage = row["source"]["text"]
-document_id = row["source"]["version_id"]
-```
-
-The embedding model is trained to place the query close to its corresponding positive passage.
-
-| Field                 | Meaning                                                                        | Retrieval use                                                                |
-| --------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `question`            | Synthetic legal query generated from the source passage                        | Query                                                                        |
-| `answer`              | Answer generated from the source passage                                       | QA validation; not normally required for bi-encoder training                 |
-| `text`                | Combined question-and-answer string                                            | Do not use as the retrieval passage because it contains the query and answer |
-| `prompt`              | Full QA-generation prompt, including metadata, source snippet and instructions | Provenance and debugging                                                     |
-| `source.text`         | Original legal passage                                                         | Positive passage                                                             |
-| `source.version_id`   | Identifier for the underlying legal document or document version               | Primary document-level grouping key                                          |
-| `source.source`       | Dataset or source provider, such as `nsw_caselaw`                              | Metadata                                                                     |
-| `source.url`          | Original document URL                                                          | Duplicate-document inspection and provenance                                 |
-| `source.jurisdiction` | Jurisdiction associated with the document                                      | Metadata and stratified analysis                                             |
-| `source.citation`     | Formal citation or title                                                       | Duplicate-document inspection and provenance                                 |
-| `source.type`         | Legal-document type, such as `decision`                                        | Metadata and stratified analysis                                             |
-
-### Document ID versus passage ID
-
-`source.version_id` identifies the source document or document version. It does not necessarily identify a unique passage.
+This produces:
 
 ```text
-Legal document
-└── source.version_id
-    ├── passage 1
-    ├── passage 2
-    ├── passage 3
-    └── passage 4
+data/inspection/repeated_version_id_samples.jsonl
+data/inspection/citation_multi_version_candidates.jsonl
+data/inspection/metadata_multi_version_candidates.jsonl
+data/inspection/exact_passage_duplicate_groups.jsonl
+data/inspection/template_similar_passage_pairs.jsonl
+data/inspection/boilerplate_overlap_warnings.jsonl
 ```
 
-The dataset does not provide a separate passage identifier. A stable passage ID can therefore be generated from the normalised document ID and passage text:
+The normalized-URL check is also run, but it writes no candidate JSONL when no
+cross-ID URL match exists. The obsolete broad
+`text_similarity_candidates.jsonl` output is intentionally not regenerated.
 
-```python
-import hashlib
+## 2. Baseline and checkpoint evaluation
 
+`src/evaluate/evaluate.py` selects BM25 when `--model bm25` is supplied.
+Every other value is loaded as a SentenceTransformer path or Hugging Face model
+ID.
 
-def create_passage_id(row: dict) -> str:
-    document_id = row["source"]["version_id"].strip().lower()
-    passage = " ".join(row["source"]["text"].split())
+Dense evaluation:
 
-    passage_hash = hashlib.sha256(
-        passage.encode("utf-8")
-    ).hexdigest()[:16]
+1. encodes all queries with normalized embeddings;
+2. encodes all passages with normalized embeddings;
+3. calculates the query-passage dot-product matrix;
+4. ranks every passage for each query;
+5. calculates NDCG, recall and MRR;
+6. saves aggregate metrics and per-query ranks.
 
-    return f"{document_id}:{passage_hash}"
+Because embeddings are normalized, dot product is equivalent to cosine
+similarity.
+
+Evaluate the validation set:
+
+```bash
+python src/evaluate/evaluate.py \
+  --model artifacts/checkpoints/embed/gte-modernbert-base-v2-bm25/final \
+  --split data/processed/embed/validation \
+  --output reports/experiments/embed/validation_all \
+  --batch-size 32 \
+  --device cuda \
+  --trust-remote-code
 ```
 
-This gives each field a distinct responsibility:
+The evaluator writes one `.json` file and one `.md` file for each model. The
+JSON report includes `per_query`, which can be used to compare where one model
+succeeds and another fails.
+
+Evaluation uses the PyTorch SentenceTransformer checkpoint. It does not
+evaluate the exported ONNX model.
+
+## 3. Training dependency chain
+
+The complete sequence is implemented by:
+
+```bash
+sbatch scripts/slurm/train_all.sh
+```
+
+The script runs the following stages sequentially and stops when a command
+fails.
+
+### V1: in-batch negatives
+
+```bash
+python src/training/main.py \
+  --config src/configs/embed/train.yaml
+```
+
+Inputs:
+
+- training queries, corpus and qrels;
+- base model `Alibaba-NLP/gte-modernbert-base`.
+
+Output:
 
 ```text
-source.version_id
-    → identifies and groups the legal document
-
-passage_id
-    → identifies one unique passage from that document
-
-source.text
-    → contains the passage content
+artifacts/checkpoints/embed/gte-modernbert-base/final/
 ```
 
----
+### BM25 hard-negative mining
 
-## 3. Leakage model
+```bash
+python src/mining/mine.py \
+  --config src/configs/embed/mine_bm25.yaml
+```
 
-The desired evaluation setting is a new query over a held-out legal document. Leakage can occur on the query side, passage side or document side.
-
-| Validation question compared with training question | Same passage                                                                     | Near-same or overlapping passage                                            | Different passage from same document  | Different passage from different document                                 |
-| --------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------- |
-| **Exact same question**                             | Critical direct leakage: the query–passage pair may already have been trained on | High leakage: the query is memorised and much of the content was seen       | Query leakage and document dependence | Query leakage, valid multi-positive query, ambiguity or incorrect pairing |
-| **Near-same question**                              | High leakage: near-duplicate supervision over a seen passage                     | High leakage on both query and passage sides                                | Moderate-to-high contamination        | Query-side contamination that weakens an unseen-query claim               |
-| **Different question**                              | Passage leakage: new query over a passage used in training                       | Content leakage: validation content substantially overlaps training content | Document-level contamination          | Cleanest case, assuming no hidden duplicate documents                     |
-
-The primary split policy must therefore prevent:
-
-1. rows from the same `source.version_id` appearing in different splits; and
-2. exactly identical passages associated with different IDs appearing across different splits.
-
-Approximate template similarity and shared boilerplate are recorded for audit purposes but are not sufficient evidence for merging documents or forcing them into the same split.
-
----
-
-## 4. Inspection outputs
-
-The inspection distinguishes repeated IDs, duplicate-document candidates, exact passage reuse, template similarity and shared boilerplate.
-
-The dataset contains sampled QA passages rather than guaranteed complete document text. Consequently:
-
-> A passage match is evidence about the sampled text, not automatic proof that the complete legal documents are duplicates.
-
-### Output summary
-
-| Check                                    | Output                                    |                        Result | Final action                                                                   |
-| ---------------------------------------- | ----------------------------------------- | ----------------------------: | ------------------------------------------------------------------------------ |
-| 1A. Repeated `version_id`                | `repeated_version_id_samples.jsonl`       | 12 rows across 6 repeated IDs | Keep valid rows and keep each `version_id` within one split                    |
-| 1B. Same normalised URL across IDs       | No candidate JSONL                        |   0 duplicate normalised URLs | No action required                                                             |
-| 2. Same normalised citation across IDs   | `citation_multi_version_candidates.jsonl` |              3 candidate rows | Retain as separate documents after inspection                                  |
-| 3. Same citation and metadata across IDs | `metadata_multi_version_candidates.jsonl` |              3 candidate rows | Retain as separate documents after inspection                                  |
-| 4A. Exact normalised passage hash        | `exact_passage_duplicate_groups.jsonl`    |    2 groups containing 5 rows | Keep all supported rows and keep each exact-text group within one split        |
-| 4B. High Jaccard and similar length      | `template_similar_passage_pairs.jsonl`    |                       2 pairs | Retain as distinct legal instruments                                           |
-| 4C. High containment or shared text      | `boilerplate_overlap_warnings.jsonl`      |                      55 pairs | Retain all rows and ignore these relationships for deduplication and splitting |
-
-Each line in a JSONL file is an independent JSON object:
-
-* group outputs contain one object per group;
-* pair outputs contain one object per directly compared pair.
-
-The legacy file `text_similarity_candidates.jsonl` was generated before Check 4 was divided into exact matches, template similarity and containment warnings. It is retained only for audit history and must not be used for deduplication, grouping or split assignment.
-
----
-
-## 5. Check 1A: repeated `version_id`
-
-### Purpose
-
-This check identifies rows that share the same normalised `source.version_id`.
-
-Repeated IDs are not evidence of duplicate documents. They normally indicate that multiple QA examples were sampled from the same legal document version.
-
-### Result
+Outputs:
 
 ```text
-Total rows:                  2,124
-Non-missing version IDs:     2,124
-Missing version IDs:         0
-Unique version IDs:          2,118
-Repeated version-ID groups:  6
-Extra rows from repeats:      6
+data/interim/embed/negatives/bm25/train.jsonl
+reports/data/embed/bm25_hard_negatives.json
 ```
 
-Repeated IDs:
+These negatives are consumed by V2 training.
+
+### V2: BM25 hard negatives
+
+```bash
+python src/training/main.py \
+  --config src/configs/embed/train_v2_bm25.yaml
+```
+
+Output:
 
 ```text
-federal_court_of_australia:fca/single/1983/1983fca0149
-federal_court_of_australia:fca/single/1995/1995fca1173
-federal_court_of_australia:fca/single/1997/1997fca0188
-federal_court_of_australia:fca/single/1997/1997fca0669
-nsw_caselaw:549f7a493004262463a9533b
-nsw_caselaw:599f6857e4b058596cba9963
+artifacts/checkpoints/embed/gte-modernbert-base-v2-bm25/final/
 ```
 
-Each repeated ID occurs twice, producing 12 rows across 6 document versions.
+### Dense hard-negative mining
 
-### Decision
+```bash
+python src/mining/mine.py \
+  --config src/configs/embed/mine_dense.yaml
+```
+
+`mine_dense.yaml` uses the completed V2 checkpoint as its retrieval model.
+
+Outputs:
 
 ```text
-repeated version_id
-→ multiple QA examples from one document version
-→ retain valid rows
-→ keep all rows for the document in the same split
+data/interim/embed/negatives/dense/train.jsonl
+reports/data/embed/dense_hard_negatives.json
 ```
 
-A row should only be removed if the exact question–passage pair is duplicated or the passage does not support the generated answer.
+### V3: dense hard negatives
 
-### Output
+```bash
+python src/training/main.py \
+  --config src/configs/embed/train_v3_dense.yaml
+```
+
+Output:
 
 ```text
-repeated_version_id_samples.jsonl
+artifacts/checkpoints/embed/gte-modernbert-base-v3-dense/final/
 ```
 
----
+### Teacher candidate scoring
 
-## 6. Check 1B: same normalised URL across different IDs
+```bash
+python src/mining/mine.py \
+  --config src/configs/embed/score_teacher.yaml
+```
 
-### Purpose
+This stage does not train the student. It takes the candidates already produced
+by dense mining and assigns cross-encoder teacher scores.
 
-This check identifies different `version_id` values that resolve to the same safely normalised source URL. A shared source URL would be strong evidence that two IDs may refer to the same underlying legal document.
-
-### URL normalisation
-
-The normalisation procedure:
-
-* lowercases the hostname;
-* standardises the scheme to HTTPS;
-* removes fragments and trailing slashes;
-* removes known non-identity tracking parameters such as `utm_*` and `source`;
-* preserves path capitalisation;
-* preserves query parameters that may identify the document.
-
-Removing all query parameters would be unsafe. For example, 30 Western Australian legislation records use the shared path:
+Outputs:
 
 ```text
-https://www.legislation.wa.gov.au/legislation/statutes.nsf/RedirectURL
+data/interim/embed/teacher/cross_encoder/train.jsonl
+reports/data/embed/cross_encoder_teacher_scores.json
 ```
 
-but are distinguished by identity-bearing query parameters such as:
+### V4: teacher distillation
+
+```bash
+python src/training/distill.py \
+  --config src/configs/embed/train_v4_distillation.yaml
+```
+
+V4 consumes the teacher-scored candidate lists. Its current configuration starts
+the student from `Alibaba-NLP/gte-modernbert-base`; it does not continue
+training from the V3 checkpoint.
+
+Output:
 
 ```text
-?OpenAgent&query=mrdoc_3678.docx
-?OpenAgent&query=mrdoc_1299.docx
-?OpenAgent&query=mrdoc_40983.docx
+artifacts/checkpoints/embed/gte-modernbert-base-v4-distillation/final/
 ```
 
-### Result
+## 4. Training outputs and W&B
+
+Every training configuration defines:
+
+- input retrieval data;
+- model and sequence length;
+- effective and physical mini-batch sizes;
+- optimizer settings;
+- checkpoint directory;
+- JSON report path;
+- W&B project, group, run name and tags.
+
+The four final report paths are:
 
 ```text
-Dataset URLs inspected:                     2,124
-Missing URLs:                               0
-Exact URLs linked to multiple IDs:          0
-Safely normalised URLs with multiple IDs:   0
-Path case-variant groups:                   0
+reports/experiments/embed/embed_v1.json
+reports/experiments/embed/embed_v2_bm25.json
+reports/experiments/embed/embed_v3_dense.json
+reports/experiments/embed/embed_v4_distillation.json
 ```
 
-### Decision
+W&B logging is implemented by `src/training/callback.py`. It records training
+loss during the run and validation retrieval metrics after each epoch.
 
-No exact or safely normalised URL was associated with more than one `version_id`, so no candidate JSONL was produced.
+## 5. Tokenizer compatibility
 
-This result supports the use of `source.version_id` as the document-level key, but it does not rule out duplicates appearing through:
+Some checkpoints were saved with Transformers 5 metadata:
 
-* different providers;
-* HTML and PDF copies;
-* original and corrected versions;
-* mirrored legal databases;
-* different URLs for substantively identical documents.
+```json
+"tokenizer_class": "TokenizersBackend"
+```
 
----
+Transformers 4.57 cannot resolve that class. For compatibility with the current
+cluster environment, the checkpoint metadata should instead contain:
 
-## 7. Check 2: same normalised citation across different IDs
+```json
+"tokenizer_class": "PreTrainedTokenizerFast"
+```
 
-### Purpose
+This changes tokenizer metadata only; it does not change trained weights.
+Apply the correction to V1-V4 before evaluation, upload or ONNX export.
 
-This check identifies different IDs that share the same normalised `source.citation`.
+## 6. Hugging Face publishing
 
-Citation normalisation includes:
+First perform the uploader's validation-only dry run:
 
-* case normalisation;
-* whitespace normalisation;
-* quote and dash normalisation;
-* neutral-citation extraction where possible.
+```bash
+python src/release/upload_huggingface.py \
+  --namespace Sing0402 \
+  --variants v1 v2 v3 v4 \
+  --no-private
+```
 
-For judgments, a repeated neutral citation such as `[2006] NSWSC 1018` would be strong evidence that multiple IDs may refer to the same judgment. Legislative and secondary-instrument titles are less reliable because generic titles may legitimately identify different instruments.
+Then upload the complete checkpoint folders publicly:
 
-### Result
+```bash
+python src/release/upload_huggingface.py \
+  --namespace Sing0402 \
+  --variants v1 v2 v3 v4 \
+  --no-private \
+  --execute
+```
 
-One normalised citation was associated with three different IDs:
+The uploader publishes:
+
+| Variant | Hugging Face repository |
+|---|---|
+| V1 | `Sing0402/legal-embed-gte-inbatch` |
+| V2 | `Sing0402/legal-embed-gte-bm25` |
+| V3 | `Sing0402/legal-embed-gte-dense` |
+| V4 | `Sing0402/legal-embed-gte-distilled` |
+
+The complete SentenceTransformer directory must be uploaded, not only
+`model.safetensors`.
+
+## 7. ONNX export
+
+`src/release/export_onnx.py` accepts either a local checkpoint directory or a
+Hugging Face model ID.
+
+GPU FP16 export from a local checkpoint:
+
+```bash
+python src/release/export_onnx.py \
+  --model artifacts/checkpoints/embed/gte-modernbert-base/final \
+  --output-dir artifacts/releases/legal-embed-gte-inbatch/gpu \
+  --target gpu
+```
+
+CPU FP32 plus AVX2 INT8 export:
+
+```bash
+python src/release/export_onnx.py \
+  --model artifacts/checkpoints/embed/gte-modernbert-base/final \
+  --output-dir artifacts/releases/legal-embed-gte-inbatch/cpu \
+  --target cpu \
+  --quantize-int8
+```
+
+Use `--overwrite` only when intentionally replacing an existing release
+directory.
+
+Expected optimized files include:
 
 ```text
-Proclamation under the National Parks and Wildlife Act 1970 (Tas)
+onnx/model_gpu_fp16.onnx
+onnx/model_cpu_fp32.onnx
+onnx/model_cpu_qint8_avx2.onnx
 ```
 
-Candidate IDs:
+Only the files for the selected export command will be present.
+
+## 8. ONNX validation
+
+The intended validation stage should:
+
+1. encode identical inputs with the selected PyTorch checkpoint and ONNX file;
+2. compare embedding shapes;
+3. compare cosine similarity or maximum absolute error;
+4. verify retrieval rankings;
+5. measure startup, latency and throughput;
+6. write a validation report.
+
+`src/release/validate_onnx.py` is not yet a general validation entry point. It
+currently combines a CPU model directory with `CUDAExecutionProvider` and
+references `onnx/model_cpu_fp16.onnx`, which the exporter does not create.
+Convert it to command-line arguments before treating ONNX validation as a
+release gate.
+
+## 9. Passage-index construction
+
+The dense index consists of:
 
 ```text
-tasmanian_legislation:2017-07-05/sr-1999-091
-tasmanian_legislation:2017-07-05/sr-2000-117
-tasmanian_legislation:2017-07-05/sr-2001-086
+passage_embeddings.npy
+passages.jsonl
+manifest.json
 ```
 
-Manual inspection showed that these were separate statutory instruments:
+The rows of `passages.jsonl` and `passage_embeddings.npy` have identical order.
+The manifest records the exact ONNX model hash, corpus hashes, embedding
+dimension, normalization and similarity function.
 
-| Statutory rule | Subject                                                         |
-| -------------- | --------------------------------------------------------------- |
-| `sr-1999-091`  | Long Spit Private Nature Reserve                                |
-| `sr-2000-117`  | Deal Island Conservation Area                                   |
-| `sr-2001-086`  | Lime Bay, Peter Murrell and Three Hummock Island State Reserves |
+Build a GPU deployment index containing all QA passages:
 
-They differ in statutory-rule number, year, URL, affected land, legal provision and operative effect.
+```bash
+python src/release/build_passage_index.py \
+  --model-dir artifacts/releases/legal-embed-gte-inbatch/gpu \
+  --corpus \
+    data/processed/embed/train/corpus.jsonl \
+    data/processed/embed/validation/corpus.jsonl \
+    data/processed/embed/test/corpus.jsonl \
+  --output-dir artifacts/indexes/legal-embed-gte-inbatch/all-qa \
+  --target gpu \
+  --batch-size 64
+```
 
-### Decision
+Combining train, validation and test is appropriate for a final demonstration
+or deployment index after evaluation is complete. For evaluation, index only
+the corpus belonging to the evaluated split.
 
-The citation collision is a false-positive duplicate signal caused by a generic legislative title.
+The current index performs exact NumPy dot-product search. This is suitable for
+the small QA corpus. A much larger production corpus should use an approximate
+nearest-neighbour index such as FAISS or HNSW.
+
+## 10. Search
+
+The current retriever expects the GPU FP16 ONNX model and normalized passage
+embeddings:
+
+```bash
+PYTHONPATH=src python src/inference/search.py \
+  --model artifacts/releases/legal-embed-gte-inbatch/gpu \
+  --embeddings artifacts/indexes/legal-embed-gte-inbatch/all-qa/passage_embeddings.npy \
+  --passages artifacts/indexes/legal-embed-gte-inbatch/all-qa/passages.jsonl \
+  --query "What factors determine whether bail should be granted?" \
+  --top-k 5
+```
+
+Runtime processing is:
 
 ```text
-same normalised citation
-→ generate candidate
-→ inspect manually
-→ never merge solely on citation
+query
+→ ONNX query embedding
+→ L2 normalization
+→ dot product against passage_embeddings.npy
+→ top-k passage metadata
+→ JSON response
 ```
 
-### Output
+`src/inference/retriever.py` currently hard-codes
+`CUDAExecutionProvider` and `onnx/model_gpu_fp16.onnx`. It must be made
+configurable before the same search entry point can serve CPU releases.
+
+## 11. Output ownership
 
 ```text
-citation_multi_version_candidates.jsonl
+data/raw/                         source dataset
+data/processed/embed/             immutable retrieval splits
+data/interim/embed/negatives/     mined BM25 and dense negatives
+data/interim/embed/teacher/       teacher-scored candidates
+artifacts/checkpoints/embed/      training checkpoints
+artifacts/releases/               exported deployable models
+artifacts/indexes/                passage indexes
+reports/data/embed/               preparation and mining reports
+reports/experiments/embed/        training and evaluation reports
 ```
 
----
-
-## 8. Check 3: same citation and metadata across different IDs
-
-### Purpose
-
-This check strengthens the citation comparison by combining:
-
-```text
-normalised citation
-+ jurisdiction
-+ document type
-+ derived citation year
-```
-
-### Result
-
-The same three Tasmanian proclamations were identified. The additional metadata did not establish that they were duplicates because their statutory-rule identifiers and substantive legal effects remained different.
-
-### Decision
-
-A shared citation-and-metadata key is a stronger candidate-generation signal than citation alone, but it is still not proof of document duplication.
-
-All three instruments are retained separately.
-
-### Output
-
-```text
-metadata_multi_version_candidates.jsonl
-```
-
----
-
-## 9. Check 4: passage-level similarity
-
-Text similarity was divided into three operationally different cases:
-
-1. exact normalised passage duplicates;
-2. high-Jaccard, similar-length passages;
-3. high-containment or shared-text warnings.
-
-This separation prevents common legal wording from creating large false-positive duplicate clusters.
-
-### Similarity measures
-
-Passages are represented using five-token shingles.
-
-For shingle sets (A) and (B), Jaccard similarity is:
-
-[
-J(A,B)=\frac{|A\cap B|}{|A\cup B|}
-]
-
-Shorter-passage containment is:
-
-[
-C(A,B)=\frac{|A\cap B|}{\min(|A|,|B|)}
-]
-
-Jaccard similarity measures overall overlap. Containment detects cases in which a short generic passage appears almost entirely inside a longer passage.
-
-LSH is used only to generate likely candidate pairs efficiently. Exact Jaccard, containment and length-ratio values are then calculated for those candidates.
-
-### 9.1 Check 4A: exact normalised passage duplicates
-
-#### Method
-
-```text
-normalise passage
-→ calculate SHA-256 hash
-→ group different version_ids with the same hash
-```
-
-This is the strongest passage-level duplication signal. It proves exact reuse of the sampled passage, but not necessarily duplication of the complete legal documents.
-
-#### Result
-
-Two exact-text groups were identified.
-
-**Group 1: CASA Airworthiness Directive wording**
-
-Rows:
-
-```text
-447
-1490
-1543
-```
-
-Document IDs:
-
-```text
-federal_register_of_legislation:F2006B04469
-federal_register_of_legislation:F2006B07349
-federal_register_of_legislation:F2006B08555
-```
-
-The shared passage explains the general purpose and operation of CASA Airworthiness Directives.
-
-**Group 2: legislative endnotes**
-
-Rows:
-
-```text
-1230
-1661
-```
-
-Document IDs:
-
-```text
-federal_register_of_legislation:C2016C01044
-federal_register_of_legislation:F2018C00828
-```
-
-The shared passage explains the information contained in legislative endnotes.
-
-#### Manual review
-
-| Rows            | Shared content                                         | Supported by passage? | Action |
-| --------------- | ------------------------------------------------------ | --------------------: | ------ |
-| 447, 1490, 1543 | Purpose and operation of CASA Airworthiness Directives |                   Yes | Keep   |
-| 1230, 1661      | Information provided by legislative endnotes           |                   Yes | Keep   |
-
-All five QA pairs are supported by their passages, so no rows are removed.
-
-#### Evaluation treatment
-
-Members of an exact-text group must remain within the same split.
-
-During evaluation, identical passages must not be treated as negatives for one another. Two valid approaches are available:
-
-* **Equivalent positives:** treat every identical passage in the group as a valid positive;
-* **Canonical passage:** store the passage once and associate it with all supported questions and source metadata.
-
-#### Output
-
-```text
-exact_passage_duplicate_groups.jsonl
-```
-
-### 9.2 Check 4B: high-Jaccard, similar-length passages
-
-#### Rule
-
-A pair is labelled as template-similar when:
-
-```python
-possible_template_similarity = (
-    jaccard_similarity >= 0.85
-    and length_ratio >= 0.80
-)
-```
-
-where:
-
-```python
-length_ratio = min(length_a, length_b) / max(length_a, length_b)
-```
-
-The length-ratio condition reduces false positives caused by a short disclaimer or introduction being contained within a much longer passage.
-
-#### Result
-
-Two pairs were identified.
-
-**Pair 1: Tariff Concession Revocation Orders**
-
-Rows:
-
-```text
-1159
-1351
-```
-
-The passages reuse the same statutory template but differ in order number, original order date, citation and source URL.
-
-**Pair 2: Tariff Concession Orders**
-
-Rows:
-
-```text
-295
-1261
-```
-
-The passages reuse the same statutory template but differ in concession-order number, effective date, citation and source URL.
-
-#### Decision
-
-These are separate legal instruments.
-
-```text
-high Jaccard + similar length
-→ shared drafting template
-→ retain both documents
-→ do not merge or deduplicate
-```
-
-Template similarity is not used as a split constraint. Generalisation to a new legal document may legitimately involve a drafting structure that was seen during training.
-
-#### Output
-
-```text
-template_similar_passage_pairs.jsonl
-```
-
-### 9.3 Check 4C: high containment and shared-text warnings
-
-#### Rule
-
-```text
-containment >= 0.90
-and the pair does not satisfy the Check 4B rule
-→ record a shared-text warning
-→ do not use as a grouping edge
-```
-
-This output includes shared boilerplate and highly templated text that falls below the stricter 4B Jaccard threshold.
-
-#### Result
-
-The output contains 55 pairs. The main patterns are:
-
-* NSW tribunal certification and publication disclaimers;
-* standard CASA Airworthiness Directive introductions;
-* repeated statutory wording in tariff instruments.
-
-These similarities arise from recurring legal language rather than confirmed duplicate documents.
-
-#### Decision
-
-```text
-high containment or shared boilerplate
-→ retain all rows
-→ do not merge
-→ do not deduplicate
-→ do not construct connected components
-→ do not use for split assignment
-```
-
-The pairs do not require individual manual review. The file is retained as an audit record showing why containment alone cannot establish duplication.
-
-#### Output
-
-```text
-boilerplate_overlap_warnings.jsonl
-```
-
----
-
-## 10. Final deduplication policy
-
-| Signal                                 | Interpretation                                      | Dataset action                                    | Split action                                |
-| -------------------------------------- | --------------------------------------------------- | ------------------------------------------------- | ------------------------------------------- |
-| Repeated `version_id`                  | Multiple QA examples from one document version      | Keep valid rows                                   | Keep the same `version_id` within one split |
-| Same safely normalised URL across IDs  | Strong duplicate-document candidate                 | Verify manually                                   | Group only if confirmed                     |
-| Same citation across IDs               | Citation collision or possible version relationship | Inspect only                                      | No automatic grouping                       |
-| Same citation and metadata             | Stronger candidate, but not proof                   | Inspect only                                      | No automatic grouping                       |
-| Exact normalised passage hash          | Exact passage reuse                                 | Validate question support and keep supported rows | Keep the exact-text group within one split  |
-| Jaccard ≥ 0.85 and length ratio ≥ 0.80 | Shared legal template                               | Keep as distinct documents                        | Split independently                         |
-| High containment or shared boilerplate | Repeated generic legal language                     | Keep and ignore for deduplication                 | Split independently                         |
-
-No connected-component grouping is used for approximate or containment matches. This avoids large false-positive clusters joined transitively through common legal introductions, disclaimers, endnotes and drafting templates.
-
----
-
-## 11. Split policy
-
-The default split unit is the normalised document ID:
-
-```text
-source.version_id
-```
-
-All QA rows associated with one document version must remain in the same split.
-
-The only additional constraint discovered by the inspection applies to exact passage groups:
-
-```text
-same version_id
-or
-same exact normalised passage group
-→ same split
-```
-
-Conceptually:
-
-```python
-split_group_id = normalised_version_id
-
-if normalised_version_id in exact_passage_group:
-    split_group_id = exact_passage_group_id
-```
-
-Template-similar pairs and containment warnings remain independent because they represent distinct legal documents rather than confirmed duplicates.
-
-After constructing the split, a final leakage audit should verify that:
-
-* no `version_id` occurs in more than one split;
-* no exact normalised passage hash occurs in more than one split;
-* no exact question–passage pair occurs in more than one split.
-
----
+Large generated data, checkpoints, ONNX files and indexes should remain outside
+Git unless explicitly managed with an artifact store.
+
+## 12. Common failure points
+
+- Run commands from the repository root.
+- Set `PYTHONPATH` to the repository's `src/` directory.
+- Use `from mining.util ...`, not `from util ...`, in mining modules.
+- Check tokenizer metadata when loading a Transformers 5 checkpoint with
+  Transformers 4.
+- Set `HF_HOME` to writable scratch storage on the cluster.
+- GPU ONNX requires `CUDAExecutionProvider`; do not silently fall back to CPU.
+- Use the same ONNX model file for passage indexing and query serving.
+- Use `--overwrite` only when replacing known release or index outputs.
